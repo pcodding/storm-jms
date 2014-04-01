@@ -216,12 +216,11 @@ public class JmsSpout extends BaseRichSpout implements MessageListener {
 				if (this.isDurableSubscription()
 						|| (msg.getJMSDeliveryMode() != Session.AUTO_ACKNOWLEDGE)) {
 					LOG.debug("Requesting acks.");
-					this.collector.emit(vals, msg.getJMSMessageID());
-
 					// at this point we successfully emitted. Store
 					// the message and message ID so we can do a
 					// JMS acknowledge later
 					this.pendingMessages.put(msg.getJMSMessageID(), msg);
+					this.collector.emit(vals, msg.getJMSMessageID());
 				} else {
 					this.collector.emit(vals);
 				}
