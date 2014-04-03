@@ -141,11 +141,20 @@ public class JmsSpout extends BaseRichSpout implements MessageListener {
 	 * <code>nextTuple()</code> method.
 	 */
 	public void onMessage(Message msg) {
+		boolean received = false;
 		try {
 			LOG.debug("Queuing msg [" + msg.getJMSMessageID() + "]");
+			received = this.queue.offer(msg);
+			if (received
+					&& getJmsAcknowledgeMode() == Session.CLIENT_ACKNOWLEDGE)
+				msg.acknowledge();
 		} catch (JMSException e) {
+		} finally {
+			if (!received)
+				synchronized (this.recoveryMutex) {
+					this.hasFailures = true;
+				}
 		}
-		this.queue.offer(msg);
 	}
 
 	/**
@@ -250,19 +259,7 @@ public class JmsSpout extends BaseRichSpout implements MessageListener {
 	 * Will only be called if we're transactional or not AUTO_ACKNOWLEDGE
 	 */
 	public void ack(Object msgId) {
-
 		Message msg = this.pendingMessages.remove(msgId);
-		if (msg != null) {
-			try {
-				msg.acknowledge();
-				LOG.debug("JMS Message acked: " + msgId);
-			} catch (JMSException e) {
-				LOG.warn("Error acknowldging JMS message: " + msgId, e);
-			}
-		} else {
-			LOG.warn("Couldn't acknowledge unknown JMS message ID: " + msgId);
-		}
-
 	}
 
 	/*
@@ -270,9 +267,10 @@ public class JmsSpout extends BaseRichSpout implements MessageListener {
 	 */
 	public void fail(Object msgId) {
 		LOG.warn("Message failed: " + msgId);
-		this.pendingMessages.remove(msgId);
-		synchronized (this.recoveryMutex) {
-			this.hasFailures = true;
+		// Add message back to queue for reprocessing
+		Message message = this.pendingMessages.get(msgId);
+		if (!this.queue.offer(message)) {
+			LOG.error("Could not reprocess JMS message ID: " + msgId);
 		}
 	}
 
